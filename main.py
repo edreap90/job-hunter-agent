@@ -5,6 +5,7 @@ import requests
 import openai
 import json
 from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 
 # --- CONFIG ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -12,29 +13,35 @@ ZAPIER_HOOK_URL = os.getenv("ZAPIER_HOOK_URL")
 ASSISTANT_ID = "asst_U32xY6OxubvMQjsWi5WWWnZx" 
 openai.api_key = OPENAI_API_KEY
 
-# --- SCRAPE JOBS FROM Rem oteOK ---
+# --- SCRAPE JOBS FROM RemoteOK ---
 def scrape_remoteok():
     url = "https://remoteok.com/remote-analytics-jobs"
     headers = {"User-Agent": "Mozilla/5.0"}
     jobs = []
     response = requests.get(url, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
-    
+
     for tr in soup.find_all("tr", class_="job"):
         try:
             title = tr.find("h2").get_text(strip=True)
             company = tr.find("h3").get_text(strip=True)
             location = tr.find("div", class_="location").get_text(strip=True)
             link = "https://remoteok.com" + tr["data-href"]
+
+            job_page = requests.get(link, headers=headers)
+            job_soup = BeautifulSoup(job_page.text, "html.parser")
+            desc_tag = job_soup.find("div", class_="description")
+            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
+
             jobs.append({
                 "title": title,
                 "company": company,
                 "location": location,
-                "description": "N/A",
+                "description": description,
                 "link": link
             })
         except Exception as e:
-            print(f"❌ Error parsing job row: {e}")
+            print(f"❌ Error parsing RemoteOK job row: {e}")
     return jobs
 
 # --- SCRAPE JOBS FROM TechJobsForGood ---
@@ -50,11 +57,17 @@ def scrape_techjobsforgood():
             company = job_card.select_one(".organization-name").text.strip()
             location = job_card.select_one(".job-location").text.strip()
             link = "https://www.techjobsforgood.com" + job_card.find("a")["href"]
+
+            job_page = requests.get(link, headers=headers)
+            job_soup = BeautifulSoup(job_page.text, "html.parser")
+            desc_tag = job_soup.select_one(".job-description")
+            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
+
             jobs.append({
                 "title": title,
                 "company": company,
                 "location": location,
-                "description": "N/A",
+                "description": description,
                 "link": link
             })
         except Exception as e:
@@ -74,15 +87,47 @@ def scrape_idealist():
             company = job_card.select_one("a[data-testid='job-company-name']").text.strip()
             location = job_card.select_one("span[data-testid='job-location']").text.strip()
             link = "https://www.idealist.org" + job_card.find("a")["href"]
+
+            job_page = requests.get(link, headers=headers)
+            job_soup = BeautifulSoup(job_page.text, "html.parser")
+            desc_tag = job_soup.select_one("div[data-testid='job-details']")
+            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
+
             jobs.append({
                 "title": title,
                 "company": company,
                 "location": location,
-                "description": "N/A",
+                "description": description,
                 "link": link
             })
         except Exception as e:
             print(f"❌ Error parsing Idealist job: {e}")
+    return jobs
+
+# --- SCRAPE JOBS FROM Indeed RSS ---
+def scrape_indeed_rss():
+    url = "https://www.indeed.com/rss?q=data+analyst+nonprofit+remote"
+    jobs = []
+    response = requests.get(url)
+    if response.status_code != 200:
+        print("❌ Failed to fetch Indeed RSS feed")
+        return jobs
+
+    root = ET.fromstring(response.content)
+    for item in root.findall(".//item"):
+        try:
+            title = item.find("title").text
+            link = item.find("link").text
+            description = item.find("description").text
+            jobs.append({
+                "title": title,
+                "company": "Indeed (via RSS)",
+                "location": "Remote or US",  # RSS doesn’t always provide location
+                "description": description,
+                "link": link
+            })
+        except Exception as e:
+            print(f"❌ Error parsing Indeed RSS job: {e}")
     return jobs
 
 # --- FORMAT FOR GPT ---
@@ -94,7 +139,7 @@ def format_jobs_for_gpt(jobs):
 
 # --- MAIN LOGIC ---
 def main():
-    jobs = scrape_remoteok() + scrape_techjobsforgood() + scrape_idealist()
+    jobs = scrape_remoteok() + scrape_techjobsforgood() + scrape_idealist() + scrape_indeed_rss()
     print(f"🔍 Fetched {len(jobs)} jobs")
 
     if not jobs:
