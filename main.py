@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 # --- CONFIG ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ZAPIER_HOOK_URL = os.getenv("ZAPIER_HOOK_URL")
-ASSISTANT_ID = "your-assistant-id-here"  # Replace this
+ASSISTANT_ID = "asst_U32xY6OxubvMQjsWi5WWWnZx" 
 openai.api_key = OPENAI_API_KEY
 
 # --- SCRAPE JOBS FROM RemoteOK ---
