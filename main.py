@@ -2,12 +2,13 @@ import os
 import requests
 import openai
 import json
+import pandas as pd
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 
@@ -17,7 +18,7 @@ ZAPIER_HOOK_URL = os.getenv("ZAPIER_HOOK_URL")
 ASSISTANT_ID = "asst_U32xY6OxubvMQjsWi5WWWnZx"
 openai.api_key = OPENAI_API_KEY
 
-# --- SCRAPE JOBS FROM INDEED (Multi-keyword/location, bot-resistant) ---
+# --- SCRAPE JOBS FROM INDEED (Stealth + BeautifulSoup) ---
 def fetch_indeed_jobs(keywords=["analytics", "data", "insights"], locations=["new york", "remote"]):
     options = Options()
     options.add_argument("--headless")
@@ -25,10 +26,18 @@ def fetch_indeed_jobs(keywords=["analytics", "data", "insights"], locations=["ne
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
-
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True)
+
     jobs = []
 
     for keyword in keywords:
@@ -36,33 +45,42 @@ def fetch_indeed_jobs(keywords=["analytics", "data", "insights"], locations=["ne
             query = keyword.replace(" ", "+")
             loc = location.replace(" ", "+")
             url = f"https://www.indeed.com/jobs?q={query}&l={loc}&radius=25"
+            print(f"🌐 Visiting: {url}")
 
             try:
                 driver.get(url)
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_all_elements_located((By.CLASS_NAME, "result"))
-                )
-                time.sleep(2)
-                job_cards = driver.find_elements(By.CLASS_NAME, "result")
+                time.sleep(3)
+                soup = BeautifulSoup(driver.page_source, 'lxml')
+                job_cards = soup.find_all('div', class_='job_seen_beacon')
                 print(f"🔍 Found {len(job_cards)} jobs for '{keyword}' in '{location}'")
 
-                for card in job_cards[:10]:  # limit for speed
+                for i in job_cards[:10]:
                     try:
-                        title = card.find_element(By.CLASS_NAME, "jobTitle").text
-                        link = card.find_element(By.CLASS_NAME, "jcs-JobTitle").get_attribute("href")
-                        company = card.find_element(By.CLASS_NAME, "companyName").text
-                        loc_text = card.find_element(By.CLASS_NAME, "companyLocation").text
-                        summary = card.find_element(By.CLASS_NAME, "job-snippet").text
+                        link = i.find('a', {'data-jk': True})
+                        job_url = f"https://www.indeed.com{link.get('href')}" if link else None
+
+                        title_tag = i.find('h2') or i.find('a', class_=lambda x: x and 'jobTitle' in x)
+                        title = title_tag.text.strip() if title_tag else None
+
+                        company_tag = i.find('span', {'data-testid': 'company-name'})
+                        company = company_tag.text.strip() if company_tag else None
+
+                        location_tag = i.find('div', {'data-testid': 'text-location'})
+                        location_text = location_tag.text.strip() if location_tag else ''
+
+                        desc_tag = i.find('div', class_='job-snippet')
+                        summary = desc_tag.text.strip() if desc_tag else ''
 
                         jobs.append({
                             "title": title,
                             "company": company,
-                            "location": loc_text,
+                            "location": location_text,
                             "description": summary,
-                            "link": link,
+                            "link": job_url,
                             "source": "Indeed"
                         })
-                    except Exception:
+                    except Exception as inner_e:
+                        print(f"⚠️ Error parsing job card: {inner_e}")
                         continue
 
             except Exception as e:
