@@ -27,7 +27,7 @@ jobs:
             xvfb \
             libnss3 \
             libxss1 \
-            libasound2
+            libasound2t64
 
       - name: Set up Chrome
         uses: browser-actions/setup-chrome@v1
