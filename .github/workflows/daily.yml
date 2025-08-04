@@ -2,11 +2,10 @@ name: Daily Job Hunter
 
 on:
   schedule:
-    - cron: '30 13 * * *'  # every day at 9:30 AM ET (adjust as needed)
-  workflow_dispatch:       # allows manual runs
+    - cron: '30 13 * * *'  # Every day at 9:30 AM ET
+  workflow_dispatch:
 
 jobs:
-
   run-job-scout:
     runs-on: ubuntu-latest
 
@@ -19,18 +18,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-    
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
-
-      - name: Install ChromeDriver
+      - name: Install system dependencies for Chrome
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip xvfb libxi6 libgconf-2-4 libappindicator1 libindicator7
-          sudo apt-get install -y chromium-driver
+          sudo apt-get install -y \
+            wget \
+            unzip \
+            xvfb \
+            libnss3 \
+            libxss1 \
+            libasound2
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
 
       - name: Install Python dependencies
         run: |
