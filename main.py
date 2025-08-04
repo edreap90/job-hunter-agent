@@ -5,7 +5,12 @@ import requests
 import openai
 import json
 from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+import time
 
 # --- CONFIG ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -13,121 +18,48 @@ ZAPIER_HOOK_URL = os.getenv("ZAPIER_HOOK_URL")
 ASSISTANT_ID = "asst_U32xY6OxubvMQjsWi5WWWnZx" 
 openai.api_key = OPENAI_API_KEY
 
-# --- SCRAPE JOBS FROM RemoteOK ---
-def scrape_remoteok():
-    url = "https://remoteok.com/remote-analytics-jobs"
-    headers = {"User-Agent": "Mozilla/5.0"}
+# --- SCRAPE JOBS FROM Indeed using Selenium ---
+def scrape_indeed_selenium():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
     jobs = []
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
+    url = "https://www.indeed.com/jobs?q=data+analyst+nonprofit+remote"
+    driver.get(url)
+    time.sleep(3)
 
-    for tr in soup.find_all("tr", class_="job"):
+    job_cards = driver.find_elements(By.CLASS_NAME, "job_seen_beacon")
+    for card in job_cards[:10]:  # limit for speed
         try:
-            title = tr.find("h2").get_text(strip=True)
-            company = tr.find("h3").get_text(strip=True)
-            location = tr.find("div", class_="location").get_text(strip=True)
-            link = "https://remoteok.com" + tr["data-href"]
+            title = card.find_element(By.CLASS_NAME, "jobTitle").text
+            company = card.find_element(By.CLASS_NAME, "companyName").text
+            location = card.find_element(By.CLASS_NAME, "companyLocation").text
+            job_link = card.find_element(By.TAG_NAME, "a").get_attribute("href")
 
-            job_page = requests.get(link, headers=headers)
-            job_soup = BeautifulSoup(job_page.text, "html.parser")
-            desc_tag = job_soup.find("div", class_="description")
-            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
+            driver.execute_script("window.open(arguments[0]);", job_link)
+            driver.switch_to.window(driver.window_handles[1])
+            time.sleep(2)
+            try:
+                desc = driver.find_element(By.ID, "jobDescriptionText").text
+            except:
+                desc = "N/A"
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
 
             jobs.append({
                 "title": title,
                 "company": company,
                 "location": location,
-                "description": description,
-                "link": link
+                "description": desc,
+                "link": job_link
             })
         except Exception as e:
-            print(f"❌ Error parsing RemoteOK job row: {e}")
-    return jobs
+            print(f"❌ Error scraping Indeed job: {e}")
 
-# --- SCRAPE JOBS FROM TechJobsForGood ---
-def scrape_techjobsforgood():
-    url = "https://www.techjobsforgood.com/jobs/?search=analytics"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    jobs = []
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
-    for job_card in soup.select(".job-card"):
-        try:
-            title = job_card.select_one(".job-title").text.strip()
-            company = job_card.select_one(".organization-name").text.strip()
-            location = job_card.select_one(".job-location").text.strip()
-            link = "https://www.techjobsforgood.com" + job_card.find("a")["href"]
-
-            job_page = requests.get(link, headers=headers)
-            job_soup = BeautifulSoup(job_page.text, "html.parser")
-            desc_tag = job_soup.select_one(".job-description")
-            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
-
-            jobs.append({
-                "title": title,
-                "company": company,
-                "location": location,
-                "description": description,
-                "link": link
-            })
-        except Exception as e:
-            print(f"❌ Error parsing TechJobs job: {e}")
-    return jobs
-
-# --- SCRAPE JOBS FROM Idealist ---
-def scrape_idealist():
-    url = "https://www.idealist.org/en/jobs?search_mode=true&q=analytics"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    jobs = []
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
-    for job_card in soup.select(".styles_component__JobCardWrapper-sc-1lf4q2o-0"):
-        try:
-            title = job_card.select_one("h2").text.strip()
-            company = job_card.select_one("a[data-testid='job-company-name']").text.strip()
-            location = job_card.select_one("span[data-testid='job-location']").text.strip()
-            link = "https://www.idealist.org" + job_card.find("a")["href"]
-
-            job_page = requests.get(link, headers=headers)
-            job_soup = BeautifulSoup(job_page.text, "html.parser")
-            desc_tag = job_soup.select_one("div[data-testid='job-details']")
-            description = desc_tag.get_text(strip=True) if desc_tag else "N/A"
-
-            jobs.append({
-                "title": title,
-                "company": company,
-                "location": location,
-                "description": description,
-                "link": link
-            })
-        except Exception as e:
-            print(f"❌ Error parsing Idealist job: {e}")
-    return jobs
-
-# --- SCRAPE JOBS FROM Indeed RSS ---
-def scrape_indeed_rss():
-    url = "https://www.indeed.com/rss?q=data+analyst+nonprofit+remote"
-    jobs = []
-    response = requests.get(url)
-    if response.status_code != 200:
-        print("❌ Failed to fetch Indeed RSS feed")
-        return jobs
-
-    root = ET.fromstring(response.content)
-    for item in root.findall(".//item"):
-        try:
-            title = item.find("title").text
-            link = item.find("link").text
-            description = item.find("description").text
-            jobs.append({
-                "title": title,
-                "company": "Indeed (via RSS)",
-                "location": "Remote or US",  # RSS doesn’t always provide location
-                "description": description,
-                "link": link
-            })
-        except Exception as e:
-            print(f"❌ Error parsing Indeed RSS job: {e}")
+    driver.quit()
     return jobs
 
 # --- FORMAT FOR GPT ---
@@ -139,8 +71,8 @@ def format_jobs_for_gpt(jobs):
 
 # --- MAIN LOGIC ---
 def main():
-    jobs = scrape_remoteok() + scrape_techjobsforgood() + scrape_idealist() + scrape_indeed_rss()
-    print(f"🔍 Fetched {len(jobs)} jobs")
+    jobs = scrape_indeed_selenium()
+    print(f"🔍 Fetched {len(jobs)} jobs from Indeed")
 
     if not jobs:
         print("❌ No jobs found.")
@@ -170,7 +102,6 @@ Return a summary for each job with a score from 0–100 and a recommendation.\n\
     response_text = messages.data[0].content[0].text.value
     print("✅ GPT Response:\n", response_text)
 
-    # --- Filter output based on score ---
     high_fit_lines = []
     for line in response_text.split("\n\n"):
         if "Score:" in line:
