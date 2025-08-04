@@ -1,0 +1,30 @@
+name: Daily Job Hunter
+
+on:
+  schedule:
+    - cron: '30 13 * * *'  # every day at 9:30 AM ET (adjust as needed)
+  workflow_dispatch:       # allows manual runs
+
+jobs:
+  run-job-scout:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run job scout script
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAPIER_HOOK_URL: ${{ secrets.ZAPIER_HOOK_URL }}
+        run: |
+          python main.py
